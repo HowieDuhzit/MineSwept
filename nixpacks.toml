@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm"]
+nixPkgs = ["nodejs_20"]
 aptPkgs = ["curl", "wget"]
 
 [phases.install]
