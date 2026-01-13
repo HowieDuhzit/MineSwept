@@ -35,6 +35,7 @@ const buildOptions: esbuild.BuildOptions = {
     ".hdr": "file",
     ".mp3": "file",
     ".wav": "file",
+    ".css": "css",
   },
   sourceRoot: "./src",
   publicPath: "/web-client/",

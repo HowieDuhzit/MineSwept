@@ -4,15 +4,19 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "rimraf ./build && tsx ./build.ts --build",
+    "build": "npx rimraf ./build && npx tsx ./build.ts --build",
     "iterate": "tsx ./build.ts --watch"
   },
   "dependencies": {
-    "@mml-io/3d-web-experience-client": "^0.26.1"
+    "@mml-io/3d-web-experience-client": "^0.26.1",
+    "three": "^0.170.0",
+    "postprocessing": "^6.36.5"
   },
   "devDependencies": {
     "esbuild": "0.24.2",
     "esbuild-plugin-copy": "2.1.1",
-    "rimraf": "^6.0.1"
+    "rimraf": "^6.0.1",
+    "@types/three": "^0.170.0",
+    "tsx": "^4.19.2"
   }
 }

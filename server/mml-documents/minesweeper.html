@@ -1,88 +1,128 @@
 <!-- MINESWEPT - 3D Multiplayer Minesweeper -->
-<!-- Players walk on a minefield. Click tiles to reveal them. Step on or reveal a mine = BOOM! -->
+<!-- Players physically walk across a 100x100 minefield. Step on tiles to reveal them. Hit a mine = BOOM! -->
 
 <!-- Game container -->
-<m-group id="game-root" y="0.01"></m-group>
+<m-group id="game-root" y="0"></m-group>
 
 <!-- Title display -->
 <m-label id="title-label"
   content="MINESWEPT"
-  y="8"
-  z="5"
-  font-size="80"
+  y="25"
+  z="-60"
+  font-size="120"
   color="#00ff88"
   alignment="center"
-  width="20"
-  height="3"
+  width="30"
+  height="4"
 ></m-label>
 
 <!-- Status display -->
 <m-label id="status-label"
-  content="Click tiles to reveal. Don't step on mines!"
-  y="6"
-  z="5"
-  font-size="32"
+  content="Walk across the minefield to the other side. Don't step on mines!"
+  y="22"
+  z="-60"
+  font-size="48"
   color="white"
   alignment="center"
-  width="20"
-  height="1"
+  width="35"
+  height="2"
 ></m-label>
 
 <!-- Score display -->
 <m-label id="score-label"
-  content="Tiles: 0 | Mines: 15"
-  y="5"
-  z="5"
-  font-size="24"
+  content="Tiles: 0 | Mines: 500"
+  y="20"
+  z="-60"
+  font-size="36"
   color="#ffcc00"
   alignment="center"
-  width="15"
-  height="1"
+  width="25"
+  height="2"
 ></m-label>
 
 <!-- Restart button -->
 <m-cube id="restart-button"
-  x="0" y="1" z="-8"
-  width="3" height="0.5" depth="1"
+  x="0" y="2" z="-65"
+  width="5" height="1" depth="2"
   color="#00aa55"
 >
   <m-label
     content="RESTART"
-    y="0.5"
-    font-size="24"
+    y="1"
+    font-size="36"
     color="white"
     alignment="center"
-    width="3"
-    height="0.5"
+    width="5"
+    height="1"
   ></m-label>
 </m-cube>
+
+<!-- Ambient lighting for better visibility -->
+<m-light
+  type="ambient"
+  intensity="0.6"
+  color="#ffffff"
+></m-light>
+
+<!-- Directional light (sun) -->
+<m-light
+  type="directional"
+  x="50"
+  y="100"
+  z="50"
+  intensity="0.8"
+  color="#ffffff"
+  rx="-45"
+  ry="45"
+  cast-shadows="true"
+></m-light>
+
+<!-- Additional point lights for better visibility -->
+<m-light
+  type="point"
+  x="-50"
+  y="30"
+  z="-50"
+  intensity="0.5"
+  color="#ffffff"
+></m-light>
+
+<m-light
+  type="point"
+  x="50"
+  y="30"
+  z="50"
+  intensity="0.5"
+  color="#ffffff"
+></m-light>
 
 <script>
   // ============================================
   // MINESWEPT - Game Configuration
   // ============================================
-  const GRID_SIZE = 10;           // 10x10 grid
+  const GRID_SIZE = 100;          // 100x100 grid
   const TILE_SIZE = 1.5;          // Size of each tile
-  const TILE_GAP = 0.1;           // Gap between tiles
-  const MINE_COUNT = 15;          // Number of mines
-  const TILE_HEIGHT = 0.3;        // Height of tiles
+  const TILE_GAP = 0.05;          // Small gap between tiles
+  const MINE_DENSITY = 0.05;      // 5% of tiles are mines
+  const MINE_COUNT = Math.floor(GRID_SIZE * GRID_SIZE * MINE_DENSITY); // ~500 mines
+  const TILE_HEIGHT = 0.2;        // Height of tiles
+  const PLAYER_HEIGHT = 1.6;      // Approximate player height for collision detection
 
   // Colors
   const COLORS = {
     hidden: '#4a5568',       // Gray - unrevealed
     revealed: '#2d3748',     // Dark gray - revealed safe
     mine: '#e53e3e',         // Red - mine
-    flagged: '#ed8936',      // Orange - flagged
     exploded: '#ff0000',     // Bright red - exploded
     safe: '#48bb78',         // Green - safe zone
     number: ['#3182ce', '#38a169', '#e53e3e', '#805ad5', '#d69e2e', '#00bcd4', '#1a1a1a', '#718096']
   };
 
   // Game state
-  let gameBoard = [];      // 2D array: { isMine, isRevealed, isFlagged, adjacentMines }
+  let gameBoard = [];      // 2D array: { isMine, isRevealed, adjacentMines }
   let tileElements = [];   // 2D array of m-cube elements
   let labelElements = [];  // 2D array of m-label elements for numbers
-  let probeElements = [];  // Position probes on mine tiles
+  let playerStates = new Map(); // Track per-player game state
   let gameOver = false;
   let tilesRevealed = 0;
   let totalSafeTiles = (GRID_SIZE * GRID_SIZE) - MINE_COUNT;
@@ -93,9 +133,105 @@
   const restartButton = document.getElementById('restart-button');
 
   // ============================================
+  // Player Spawn Management
+  // ============================================
+
+  // Track connected players
+  const connectedPlayers = new Map();
+
+  // Listen for player connections
+  document.addEventListener('connected', (event) => {
+    const connectionId = event.detail.connectionId;
+    console.log('Player connected:', connectionId);
+
+    // Spawn player on random edge
+    spawnPlayerOnEdge(connectionId);
+
+    // Initialize player state
+    playerStates.set(connectionId, {
+      alive: true,
+      tilesRevealed: 0
+    });
+
+    connectedPlayers.set(connectionId, true);
+  });
+
+  document.addEventListener('disconnected', (event) => {
+    const connectionId = event.detail.connectionId;
+    console.log('Player disconnected:', connectionId);
+
+    connectedPlayers.delete(connectionId);
+    playerStates.delete(connectionId);
+  });
+
+  function spawnPlayerOnEdge(connectionId) {
+    // Choose random side: 0=North, 1=East, 2=South, 3=West
+    const side = Math.floor(Math.random() * 4);
+
+    const halfBoard = (GRID_SIZE * (TILE_SIZE + TILE_GAP)) / 2;
+    const spawnDistance = halfBoard + 5; // 5 units outside the board
+
+    let spawnX, spawnZ, rotationY;
+
+    switch(side) {
+      case 0: // North (spawn at +Z, face -Z toward center)
+        spawnX = (Math.random() - 0.5) * GRID_SIZE * (TILE_SIZE + TILE_GAP);
+        spawnZ = spawnDistance;
+        rotationY = 180;
+        break;
+      case 1: // East (spawn at +X, face -X toward center)
+        spawnX = spawnDistance;
+        spawnZ = (Math.random() - 0.5) * GRID_SIZE * (TILE_SIZE + TILE_GAP);
+        rotationY = 270;
+        break;
+      case 2: // South (spawn at -Z, face +Z toward center)
+        spawnX = (Math.random() - 0.5) * GRID_SIZE * (TILE_SIZE + TILE_GAP);
+        spawnZ = -spawnDistance;
+        rotationY = 0;
+        break;
+      case 3: // West (spawn at -X, face +X toward center)
+        spawnX = -spawnDistance;
+        spawnZ = (Math.random() - 0.5) * GRID_SIZE * (TILE_SIZE + TILE_GAP);
+        rotationY = 90;
+        break;
+    }
+
+    // Create spawn point marker (visible platform)
+    const spawnMarker = document.createElement('m-cube');
+    spawnMarker.setAttribute('x', spawnX);
+    spawnMarker.setAttribute('y', 0.1);
+    spawnMarker.setAttribute('z', spawnZ);
+    spawnMarker.setAttribute('width', 3);
+    spawnMarker.setAttribute('height', 0.2);
+    spawnMarker.setAttribute('depth', 3);
+    spawnMarker.setAttribute('color', '#48bb78');
+    spawnMarker.setAttribute('visible-to', connectionId);
+
+    // Add spawn label
+    const spawnLabel = document.createElement('m-label');
+    spawnLabel.setAttribute('x', spawnX);
+    spawnLabel.setAttribute('y', 2);
+    spawnLabel.setAttribute('z', spawnZ);
+    spawnLabel.setAttribute('content', 'START HERE\nWalk to the other side!');
+    spawnLabel.setAttribute('font-size', '24');
+    spawnLabel.setAttribute('color', '#00ff88');
+    spawnLabel.setAttribute('alignment', 'center');
+    spawnLabel.setAttribute('width', 4);
+    spawnLabel.setAttribute('height', 2);
+    spawnLabel.setAttribute('visible-to', connectionId);
+
+    gameRoot.appendChild(spawnMarker);
+    gameRoot.appendChild(spawnLabel);
+
+    console.log(`Player ${connectionId} spawned at (${spawnX}, ${spawnZ}) facing ${rotationY}°`);
+  }
+
+  // ============================================
   // Game Initialization
   // ============================================
   function initializeGame() {
+    console.log('Initializing MINESWEPT 100x100...');
+
     // Clear existing game
     clearGame();
 
@@ -105,19 +241,16 @@
     gameBoard = [];
     tileElements = [];
     labelElements = [];
-    probeElements = [];
 
     // Initialize empty board
     for (let row = 0; row < GRID_SIZE; row++) {
       gameBoard[row] = [];
       tileElements[row] = [];
       labelElements[row] = [];
-      probeElements[row] = [];
       for (let col = 0; col < GRID_SIZE; col++) {
         gameBoard[row][col] = {
           isMine: false,
           isRevealed: false,
-          isFlagged: false,
           adjacentMines: 0
         };
       }
@@ -134,6 +267,8 @@
       }
     }
 
+    console.log(`Placed ${minesPlaced} mines on ${GRID_SIZE}x${GRID_SIZE} board`);
+
     // Calculate adjacent mine counts
     for (let row = 0; row < GRID_SIZE; row++) {
       for (let col = 0; col < GRID_SIZE; col++) {
@@ -147,8 +282,10 @@
     createTiles();
 
     // Update status
-    updateStatus('Click tiles to reveal. Don\'t step on mines!');
+    updateStatus('Walk across the minefield to the other side. Don\'t step on mines!');
     updateScore();
+
+    console.log('Game initialized!');
   }
 
   function clearGame() {
@@ -176,9 +313,11 @@
   }
 
   // ============================================
-  // Tile Creation
+  // Tile Creation with Collision Detection
   // ============================================
   function createTiles() {
+    console.log('Creating tiles...');
+
     const offsetX = -(GRID_SIZE * (TILE_SIZE + TILE_GAP)) / 2 + TILE_SIZE / 2;
     const offsetZ = (GRID_SIZE * (TILE_SIZE + TILE_GAP)) / 2 - TILE_SIZE / 2;
 
@@ -187,7 +326,7 @@
         const x = offsetX + col * (TILE_SIZE + TILE_GAP);
         const z = offsetZ - row * (TILE_SIZE + TILE_GAP);
 
-        // Create tile cube
+        // Create tile cube with collision detection
         const tile = document.createElement('m-cube');
         tile.setAttribute('x', x);
         tile.setAttribute('y', TILE_HEIGHT / 2);
@@ -196,13 +335,16 @@
         tile.setAttribute('height', TILE_HEIGHT);
         tile.setAttribute('depth', TILE_SIZE);
         tile.setAttribute('color', COLORS.hidden);
-        tile.setAttribute('collision-interval', '100');
+
+        // Enable collision detection - critical for physical interaction
+        tile.setAttribute('collision-interval', '50');
+
         tile.dataset.row = row;
         tile.dataset.col = col;
 
-        // Click handler
-        tile.addEventListener('click', (event) => {
-          onTileClick(row, col, event);
+        // Physical collision handler - when player steps on tile
+        tile.addEventListener('collisionstart', (event) => {
+          onTileCollision(row, col, event);
         });
 
         gameRoot.appendChild(tile);
@@ -211,67 +353,61 @@
         // Create label for numbers (hidden initially)
         const label = document.createElement('m-label');
         label.setAttribute('x', x);
-        label.setAttribute('y', TILE_HEIGHT + 0.1);
+        label.setAttribute('y', TILE_HEIGHT + 0.05);
         label.setAttribute('z', z);
         label.setAttribute('rx', -90);
         label.setAttribute('width', TILE_SIZE * 0.8);
         label.setAttribute('height', TILE_SIZE * 0.8);
-        label.setAttribute('font-size', '48');
+        label.setAttribute('font-size', '32');
         label.setAttribute('color', 'white');
         label.setAttribute('alignment', 'center');
         label.setAttribute('content', '');
+        label.setAttribute('visible', 'false');
         gameRoot.appendChild(label);
         labelElements[row][col] = label;
-
-        // Create position probe on mine tiles for step detection
-        if (gameBoard[row][col].isMine) {
-          const probe = document.createElement('m-position-probe');
-          probe.setAttribute('x', x);
-          probe.setAttribute('y', 0.5);
-          probe.setAttribute('z', z);
-          probe.setAttribute('range', TILE_SIZE * 0.6);
-          probe.setAttribute('interval', '100');
-          probe.dataset.row = row;
-          probe.dataset.col = col;
-
-          probe.addEventListener('positionenter', (event) => {
-            onMineStep(row, col, event);
-          });
-
-          gameRoot.appendChild(probe);
-          probeElements[row][col] = probe;
-        }
       }
     }
+
+    console.log(`Created ${GRID_SIZE * GRID_SIZE} tiles`);
   }
 
   // ============================================
-  // Game Logic
+  // Physical Collision Game Logic
   // ============================================
-  function onTileClick(row, col, event) {
-    if (gameOver) return;
-
-    const cell = gameBoard[row][col];
-    if (cell.isRevealed || cell.isFlagged) return;
-
-    if (cell.isMine) {
-      // BOOM! Clicked on a mine
-      triggerExplosion(row, col, 'click');
-    } else {
-      // Safe tile - reveal it
-      revealTile(row, col);
-      checkWinCondition();
-    }
-  }
-
-  function onMineStep(row, col, event) {
+  function onTileCollision(row, col, event) {
     if (gameOver) return;
 
     const cell = gameBoard[row][col];
     if (cell.isRevealed) return;
 
-    // Player stepped on a mine!
-    triggerExplosion(row, col, 'step');
+    const connectionId = event.detail.connectionId;
+
+    // Check if this player is still alive
+    const playerState = playerStates.get(connectionId);
+    if (playerState && !playerState.alive) return;
+
+    console.log(`Player ${connectionId} stepped on tile [${row},${col}]`);
+
+    if (cell.isMine) {
+      // BOOM! Stepped on a mine
+      console.log(`EXPLOSION at [${row},${col}]`);
+      triggerExplosion(row, col, connectionId);
+
+      // Mark player as dead
+      if (playerState) {
+        playerState.alive = false;
+      }
+    } else {
+      // Safe tile - reveal it
+      revealTile(row, col);
+
+      // Track player progress
+      if (playerState) {
+        playerState.tilesRevealed++;
+      }
+
+      checkWinCondition();
+    }
   }
 
   function revealTile(row, col) {
@@ -284,47 +420,29 @@
     const tile = tileElements[row][col];
     const label = labelElements[row][col];
 
-    // Update tile appearance
+    // Update tile appearance - sink it down
     tile.setAttribute('color', COLORS.revealed);
-    tile.setAttribute('y', TILE_HEIGHT / 4); // Sink it down
+    tile.setAttribute('y', TILE_HEIGHT / 4);
     tile.setAttribute('height', TILE_HEIGHT / 2);
 
     if (cell.adjacentMines > 0) {
       // Show number
       label.setAttribute('content', cell.adjacentMines.toString());
-      label.setAttribute('color', COLORS.number[cell.adjacentMines - 1] || 'white');
-      label.setAttribute('y', TILE_HEIGHT / 2 + 0.05);
+      label.setAttribute('color', COLORS.number[Math.min(cell.adjacentMines - 1, 7)] || 'white');
+      label.setAttribute('y', TILE_HEIGHT / 2 + 0.02);
+      label.setAttribute('visible', 'true');
     } else {
-      // No adjacent mines - auto-reveal neighbors
-      setTimeout(() => {
-        revealAdjacentTiles(row, col);
-      }, 50);
+      // No adjacent mines - could auto-reveal neighbors, but with 100x100 this might be expensive
+      // For performance, we'll skip auto-reveal and require players to step on each tile
     }
 
     updateScore();
   }
 
-  function revealAdjacentTiles(row, col) {
-    for (let dr = -1; dr <= 1; dr++) {
-      for (let dc = -1; dc <= 1; dc++) {
-        if (dr === 0 && dc === 0) continue;
-        const newRow = row + dr;
-        const newCol = col + dc;
-        if (newRow >= 0 && newRow < GRID_SIZE && newCol >= 0 && newCol < GRID_SIZE) {
-          if (!gameBoard[newRow][newCol].isRevealed && !gameBoard[newRow][newCol].isMine) {
-            revealTile(newRow, newCol);
-          }
-        }
-      }
-    }
-  }
-
   // ============================================
   // Explosion & Game Over
   // ============================================
-  function triggerExplosion(row, col, cause) {
-    gameOver = true;
-
+  function triggerExplosion(row, col, connectionId) {
     const tile = tileElements[row][col];
     const cell = gameBoard[row][col];
     cell.isRevealed = true;
@@ -339,9 +457,9 @@
     // Explosion sphere
     const explosion = document.createElement('m-sphere');
     explosion.setAttribute('x', offsetX);
-    explosion.setAttribute('y', 0.5);
+    explosion.setAttribute('y', 2);
     explosion.setAttribute('z', offsetZ);
-    explosion.setAttribute('radius', '0.1');
+    explosion.setAttribute('radius', '0.2');
     explosion.setAttribute('color', '#ff6600');
     explosion.setAttribute('opacity', '0.9');
     gameRoot.appendChild(explosion);
@@ -349,9 +467,9 @@
     // Animate explosion
     const expandAnim = document.createElement('m-attr-anim');
     expandAnim.setAttribute('attr', 'radius');
-    expandAnim.setAttribute('start', '0.1');
-    expandAnim.setAttribute('end', '3');
-    expandAnim.setAttribute('duration', '500');
+    expandAnim.setAttribute('start', '0.2');
+    expandAnim.setAttribute('end', '5');
+    expandAnim.setAttribute('duration', '800');
     expandAnim.setAttribute('easing', 'easeOutQuad');
     explosion.appendChild(expandAnim);
 
@@ -359,80 +477,92 @@
     fadeAnim.setAttribute('attr', 'opacity');
     fadeAnim.setAttribute('start', '0.9');
     fadeAnim.setAttribute('end', '0');
-    fadeAnim.setAttribute('duration', '500');
+    fadeAnim.setAttribute('duration', '800');
     fadeAnim.setAttribute('easing', 'easeOutQuad');
     explosion.appendChild(fadeAnim);
 
     // Rising smoke/debris
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       setTimeout(() => {
         const debris = document.createElement('m-sphere');
-        debris.setAttribute('x', offsetX + (Math.random() - 0.5) * 2);
-        debris.setAttribute('y', 0.5);
-        debris.setAttribute('z', offsetZ + (Math.random() - 0.5) * 2);
-        debris.setAttribute('radius', '0.2');
+        debris.setAttribute('x', offsetX + (Math.random() - 0.5) * 3);
+        debris.setAttribute('y', 1);
+        debris.setAttribute('z', offsetZ + (Math.random() - 0.5) * 3);
+        debris.setAttribute('radius', '0.3');
         debris.setAttribute('color', '#333333');
-        debris.setAttribute('opacity', '0.7');
+        debris.setAttribute('opacity', '0.8');
         gameRoot.appendChild(debris);
 
         const riseAnim = document.createElement('m-attr-anim');
         riseAnim.setAttribute('attr', 'y');
-        riseAnim.setAttribute('start', '0.5');
-        riseAnim.setAttribute('end', String(3 + Math.random() * 2));
-        riseAnim.setAttribute('duration', '1000');
+        riseAnim.setAttribute('start', '1');
+        riseAnim.setAttribute('end', String(5 + Math.random() * 3));
+        riseAnim.setAttribute('duration', '1200');
         riseAnim.setAttribute('easing', 'easeOutQuad');
         debris.appendChild(riseAnim);
 
         const debrisFade = document.createElement('m-attr-anim');
         debrisFade.setAttribute('attr', 'opacity');
-        debrisFade.setAttribute('start', '0.7');
+        debrisFade.setAttribute('start', '0.8');
         debrisFade.setAttribute('end', '0');
-        debrisFade.setAttribute('duration', '1000');
+        debrisFade.setAttribute('duration', '1200');
         debrisFade.setAttribute('easing', 'easeInQuad');
         debris.appendChild(debrisFade);
-      }, i * 100);
+
+        // Remove debris after animation
+        setTimeout(() => {
+          if (debris.parentNode) {
+            gameRoot.removeChild(debris);
+          }
+        }, 1300);
+      }, i * 80);
     }
 
-    // Reveal all mines
+    // Show mine marker on the tile
+    const mineLabel = labelElements[row][col];
+    mineLabel.setAttribute('content', '💣');
+    mineLabel.setAttribute('font-size', '24');
+    mineLabel.setAttribute('color', '#ffffff');
+    mineLabel.setAttribute('visible', 'true');
+    mineLabel.setAttribute('y', TILE_HEIGHT / 2 + 0.02);
+
+    // Create personal "YOU DIED" message for this player
+    const deathMessage = document.createElement('m-label');
+    deathMessage.setAttribute('x', offsetX);
+    deathMessage.setAttribute('y', 5);
+    deathMessage.setAttribute('z', offsetZ);
+    deathMessage.setAttribute('content', 'BOOM!\nYOU DIED!');
+    deathMessage.setAttribute('font-size', '48');
+    deathMessage.setAttribute('color', '#ff0000');
+    deathMessage.setAttribute('alignment', 'center');
+    deathMessage.setAttribute('width', 8);
+    deathMessage.setAttribute('height', 3);
+    deathMessage.setAttribute('visible-to', connectionId);
+    gameRoot.appendChild(deathMessage);
+
+    // Remove explosion sphere after animation
     setTimeout(() => {
-      revealAllMines();
-    }, 300);
-
-    // Update status
-    const message = cause === 'step'
-      ? 'BOOM! You stepped on a mine!'
-      : 'BOOM! You clicked a mine!';
-    updateStatus(message + ' Game Over!');
-  }
-
-  function revealAllMines() {
-    for (let row = 0; row < GRID_SIZE; row++) {
-      for (let col = 0; col < GRID_SIZE; col++) {
-        if (gameBoard[row][col].isMine && !gameBoard[row][col].isRevealed) {
-          const tile = tileElements[row][col];
-          tile.setAttribute('color', COLORS.mine);
-
-          // Add mine indicator
-          const label = labelElements[row][col];
-          label.setAttribute('content', '💣');
-          label.setAttribute('font-size', '32');
-        }
+      if (explosion.parentNode) {
+        gameRoot.removeChild(explosion);
       }
-    }
+    }, 900);
+
+    console.log(`Player ${connectionId} triggered mine at [${row},${col}]`);
   }
 
   function checkWinCondition() {
     if (tilesRevealed >= totalSafeTiles) {
       gameOver = true;
-      updateStatus('🎉 YOU WIN! All safe tiles revealed!');
+      updateStatus('🎉 SOMEONE WON! All safe tiles revealed!');
 
-      // Celebrate - turn remaining tiles green
+      // Celebrate - reveal all mines as safe
       for (let row = 0; row < GRID_SIZE; row++) {
         for (let col = 0; col < GRID_SIZE; col++) {
-          if (gameBoard[row][col].isMine) {
+          if (gameBoard[row][col].isMine && !gameBoard[row][col].isRevealed) {
             tileElements[row][col].setAttribute('color', COLORS.safe);
             labelElements[row][col].setAttribute('content', '✓');
             labelElements[row][col].setAttribute('color', '#ffffff');
+            labelElements[row][col].setAttribute('visible', 'true');
           }
         }
       }
@@ -448,7 +578,8 @@
 
   function updateScore() {
     const remaining = totalSafeTiles - tilesRevealed;
-    scoreLabel.setAttribute('content', `Revealed: ${tilesRevealed} | Remaining: ${remaining} | Mines: ${MINE_COUNT}`);
+    const percentComplete = ((tilesRevealed / totalSafeTiles) * 100).toFixed(1);
+    scoreLabel.setAttribute('content', `Revealed: ${tilesRevealed} (${percentComplete}%) | Remaining: ${remaining} | Mines: ${MINE_COUNT}`);
   }
 
   // ============================================
@@ -456,12 +587,27 @@
   // ============================================
   restartButton.addEventListener('click', () => {
     console.log('Restarting game...');
+
+    // Reset all player states
+    playerStates.clear();
+    for (const [connectionId, _] of connectedPlayers) {
+      playerStates.set(connectionId, {
+        alive: true,
+        tilesRevealed: 0
+      });
+    }
+
     initializeGame();
+
+    // Respawn all connected players
+    for (const [connectionId, _] of connectedPlayers) {
+      spawnPlayerOnEdge(connectionId);
+    }
   });
 
   // ============================================
   // Start the game!
   // ============================================
   initializeGame();
-  console.log('MINESWEPT initialized!');
+  console.log('MINESWEPT 100x100 initialized!');
 </script>
